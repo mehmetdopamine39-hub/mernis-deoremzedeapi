@@ -1,3 +1,58 @@
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
+import uvicorn
+import os
+import sys
+from typing import Optional
+
+app = FastAPI(title="Mernis + Depremzede API", 
+              description="Mernis ve Depremzede sorgulama")
+
+# ============ VERİ YÜKLEME ============
+
+def load_mernis():
+    """Mernis verilerini yükle - TC|ADRES|SOYAD|İL"""
+    data = {}
+    dosya_adi = "mernisvip.txt"
+    
+    print(f"📂 {dosya_adi} okunuyor...")
+    
+    if not os.path.exists(dosya_adi):
+        print(f"❌ {dosya_adi} dosyası BULUNAMADI!")
+        return data
+    
+    try:
+        with open(dosya_adi, "r", encoding="utf-8") as f:
+            satir_sayisi = 0
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                if "|" not in line:
+                    continue
+                    
+                parts = line.split("|")
+                if len(parts) < 4:
+                    continue
+                    
+                tc = parts[0].strip()
+                if not tc:
+                    continue
+                    
+                data[tc] = {
+                    "adres": parts[1].strip() if len(parts) > 1 else "",
+                    "soyad": parts[2].strip() if len(parts) > 2 else "",
+                    "il": parts[3].strip() if len(parts) > 3 else ""
+                }
+                satir_sayisi += 1
+            
+            print(f"✅ Mernis: {satir_sayisi} satır okundu, {len(data)} kayıt yüklendi")
+            
+    except Exception as e:
+        print(f"❌ {dosya_adi} okunurken hata: {e}")
+    
+    return data
+
 def load_depremzede():
     """Depremzede verilerini yükle - Sıra,"AD SOYAD","POLİKLİNİK","HASTANE","GELİŞ ŞEKLİ","İL" """
     data = []
@@ -45,45 +100,140 @@ def load_depremzede():
     
     return data
 
-def load_mernis():
-    """Mernis verilerini yükle - TC|ADRES|SOYAD|İL"""
-    data = {}
-    dosya_adi = "mernisvip.txt"
+# ============ VERİLERİ YÜKLE ============
+
+print("=" * 60)
+print("📊 VERİ YÜKLEME BAŞLADI")
+print("=" * 60)
+
+# Mevcut dosyaları listele
+print("📁 Mevcut dosyalar:")
+for f in os.listdir("."):
+    if f.endswith(".txt"):
+        boyut = os.path.getsize(f) if os.path.exists(f) else 0
+        print(f"   {f} ({boyut} byte)")
+
+print("=" * 60)
+
+mernis_data = load_mernis()
+depremzede_data = load_depremzede()
+
+print("=" * 60)
+print(f"📊 YÜKLEME SONUÇLARI:")
+print(f"   Mernis: {len(mernis_data)} kayıt")
+print(f"   Depremzede: {len(depremzede_data)} kayıt")
+print("=" * 60)
+
+# ============ API ENDPOINT'LERİ ============
+
+@app.get("/")
+def root():
+    return {
+        "message": "Mernis + Depremzede API",
+        "mernis_kayit": len(mernis_data),
+        "depremzede_kayit": len(depremzede_data)
+    }
+
+@app.get("/mernis")
+def mernis_sorgula(
+    tc: Optional[str] = None,
+    soyad: Optional[str] = None,
+    il: Optional[str] = None
+):
+    """
+    Mernis sorgula
+    - tc: TC Kimlik Numarası
+    - soyad: Soyad
+    - il: İl
+    """
+    sonuclar = []
     
-    print(f"📂 {dosya_adi} okunuyor...")
+    for tc_kayit, bilgi in mernis_data.items():
+        eslesme = True
+        
+        if tc:
+            if tc != tc_kayit:
+                eslesme = False
+        if soyad and eslesme:
+            if soyad.upper() not in bilgi["soyad"].upper():
+                eslesme = False
+        if il and eslesme:
+            if il.upper() not in bilgi["il"].upper():
+                eslesme = False
+        
+        if eslesme:
+            sonuclar.append({
+                "tc": tc_kayit,
+                "adres": bilgi["adres"],
+                "soyad": bilgi["soyad"],
+                "il": bilgi["il"]
+            })
     
-    if not os.path.exists(dosya_adi):
-        print(f"❌ {dosya_adi} dosyası BULUNAMADI!")
-        return data
+    if not sonuclar:
+        return {"bulundu": False, "mesaj": "Mernis kaydı bulunamadı"}
     
-    try:
-        with open(dosya_adi, "r", encoding="utf-8") as f:
-            satir_sayisi = 0
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                if "|" not in line:
-                    continue
-                    
-                parts = line.split("|")
-                if len(parts) < 4:
-                    continue
-                    
-                tc = parts[0].strip()
-                if not tc:
-                    continue
-                    
-                data[tc] = {
-                    "adres": parts[1].strip() if len(parts) > 1 else "",
-                    "soyad": parts[2].strip() if len(parts) > 2 else "",
-                    "il": parts[3].strip() if len(parts) > 3 else ""
-                }
-                satir_sayisi += 1
-            
-            print(f"✅ Mernis: {satir_sayisi} satır okundu, {len(data)} kayıt yüklendi")
-            
-    except Exception as e:
-        print(f"❌ {dosya_adi} okunurken hata: {e}")
+    return {"sonuc": len(sonuclar), "kayitlar": sonuclar}
+
+@app.get("/depremzede")
+def depremzede_sorgula(
+    ad_soyad: Optional[str] = None,
+    il: Optional[str] = None,
+    poliklinik: Optional[str] = None,
+    hastane: Optional[str] = None,
+    gelis_sekli: Optional[str] = None
+):
+    """Depremzede sorgula"""
+    sonuclar = []
     
-    return data
+    for kayit in depremzede_data:
+        eslesme = True
+        
+        if ad_soyad:
+            if ad_soyad.upper() not in kayit["ad_soyad"].upper():
+                eslesme = False
+        if il and eslesme:
+            if il.upper() not in kayit["il"].upper():
+                eslesme = False
+        if poliklinik and eslesme:
+            if poliklinik.upper() not in kayit["poliklinik"].upper():
+                eslesme = False
+        if hastane and eslesme:
+            if hastane.upper() not in kayit["hastane"].upper():
+                eslesme = False
+        if gelis_sekli and eslesme:
+            if gelis_sekli.upper() not in kayit["gelis_sekli"].upper():
+                eslesme = False
+        
+        if eslesme:
+            sonuclar.append(kayit)
+    
+    if not sonuclar:
+        return {"bulundu": False, "mesaj": "Depremzede bulunamadı"}
+    
+    return {"sonuc": len(sonuclar), "kayitlar": sonuclar}
+
+@app.get("/istatistik")
+def istatistik():
+    """İstatistik göster"""
+    return {
+        "mernis_kayit": len(mernis_data),
+        "depremzede_kayit": len(depremzede_data),
+        "toplam_kayit": len(mernis_data) + len(depremzede_data)
+    }
+
+@app.get("/debug/dosyalar")
+def debug_dosyalar():
+    """Hata ayıklama - Mevcut dosyaları listele"""
+    dosyalar = []
+    for f in os.listdir("."):
+        if f.endswith(".txt"):
+            boyut = os.path.getsize(f) if os.path.exists(f) else 0
+            dosyalar.append({
+                "isim": f,
+                "boyut": boyut,
+                "var": os.path.exists(f)
+            })
+    return {"dosyalar": dosyalar}
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
