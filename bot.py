@@ -11,7 +11,7 @@ app = FastAPI(title="Mernis + Depremzede API",
 # ============ VERİ YÜKLEME ============
 
 def load_mernis():
-    """Mernis verilerini yükle - TC|ADRES|SOYAD|İL"""
+    """Mernis verilerini yükle - TC|AD|SOYAD|İL"""
     data = {}
     dosya_adi = "mernisvip.txt"
     
@@ -40,7 +40,7 @@ def load_mernis():
                     continue
                     
                 data[tc] = {
-                    "adres": parts[1].strip() if len(parts) > 1 else "",
+                    "ad": parts[1].strip() if len(parts) > 1 else "",
                     "soyad": parts[2].strip() if len(parts) > 2 else "",
                     "il": parts[3].strip() if len(parts) > 3 else ""
                 }
@@ -54,7 +54,7 @@ def load_mernis():
     return data
 
 def load_depremzede():
-    """Depremzede verilerini yükle - Sıra,"AD SOYAD","POLİKLİNİK","HASTANE","GELİŞ ŞEKLİ","İL" """
+    """Depremzede verilerini yükle - AD SOYAD|POLİKLİNİK|HASTANE|GELİŞ ŞEKLİ|İL"""
     data = []
     dosya_adi = "depremzede.txt"
     
@@ -77,7 +77,7 @@ def load_depremzede():
                 if len(parts) < 5:
                     continue
                 
-                # Tırnakları temizle
+                # Tırnakları temizle ve boşlukları düzelt
                 ad_soyad = parts[1].strip().strip('"')
                 poliklinik = parts[2].strip().strip('"') if len(parts) > 2 else ""
                 hastane = parts[3].strip().strip('"') if len(parts) > 3 else ""
@@ -137,13 +137,17 @@ def root():
 @app.get("/mernis")
 def mernis_sorgula(
     tc: Optional[str] = None,
+    ad: Optional[str] = None,
     soyad: Optional[str] = None,
+    ad_soyad: Optional[str] = None,
     il: Optional[str] = None
 ):
     """
     Mernis sorgula
     - tc: TC Kimlik Numarası
+    - ad: Ad
     - soyad: Soyad
+    - ad_soyad: Tam Ad Soyad
     - il: İl
     """
     sonuclar = []
@@ -154,8 +158,15 @@ def mernis_sorgula(
         if tc:
             if tc != tc_kayit:
                 eslesme = False
+        if ad and eslesme:
+            if ad.upper() not in bilgi["ad"].upper():
+                eslesme = False
         if soyad and eslesme:
             if soyad.upper() not in bilgi["soyad"].upper():
+                eslesme = False
+        if ad_soyad and eslesme:
+            tam_ad = f"{bilgi['ad']} {bilgi['soyad']}"
+            if ad_soyad.upper() not in tam_ad.upper():
                 eslesme = False
         if il and eslesme:
             if il.upper() not in bilgi["il"].upper():
@@ -164,7 +175,7 @@ def mernis_sorgula(
         if eslesme:
             sonuclar.append({
                 "tc": tc_kayit,
-                "adres": bilgi["adres"],
+                "ad": bilgi["ad"],
                 "soyad": bilgi["soyad"],
                 "il": bilgi["il"]
             })
