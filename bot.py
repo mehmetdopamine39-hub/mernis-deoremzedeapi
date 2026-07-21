@@ -11,7 +11,7 @@ app = FastAPI(title="Mernis + Depremzede API",
 # ============ VERİ YÜKLEME ============
 
 def load_mernis():
-    """Mernis verilerini yükle - TC|AD|SOYAD|İL"""
+    """Mernis verilerini otomatik algıla - TC|AD|SOYAD|İL veya TC|ADRES|SOYAD|İL"""
     data = {}
     dosya_adi = "mernisvip.txt"
     
@@ -38,12 +38,27 @@ def load_mernis():
                 tc = parts[0].strip()
                 if not tc:
                     continue
-                    
-                data[tc] = {
-                    "ad": parts[1].strip() if len(parts) > 1 else "",
-                    "soyad": parts[2].strip() if len(parts) > 2 else "",
-                    "il": parts[3].strip() if len(parts) > 3 else ""
-                }
+                
+                # Formatı otomatik algıla
+                # Eğer 2. alan uzunsa (adres) veya içinde / varsa adres olarak algıla
+                alan2 = parts[1].strip() if len(parts) > 1 else ""
+                alan3 = parts[2].strip() if len(parts) > 2 else ""
+                alan4 = parts[3].strip() if len(parts) > 3 else ""
+                
+                # Adres formatı mı? (içinde / veya Mah. varsa)
+                if "/" in alan2 or "Mah" in alan2 or "Cad" in alan2 or "Sok" in alan2:
+                    data[tc] = {
+                        "adres": alan2,
+                        "soyad": alan3,
+                        "il": alan4
+                    }
+                else:
+                    # Değilse AD|SOYAD|İL formatı
+                    data[tc] = {
+                        "ad": alan2,
+                        "soyad": alan3,
+                        "il": alan4
+                    }
                 satir_sayisi += 1
             
             print(f"✅ Mernis: {satir_sayisi} satır okundu, {len(data)} kayıt yüklendi")
@@ -54,7 +69,7 @@ def load_mernis():
     return data
 
 def load_depremzede():
-    """Depremzede verilerini yükle - AD SOYAD|POLİKLİNİK|HASTANE|GELİŞ ŞEKLİ|İL"""
+    """Depremzede verilerini otomatik algıla"""
     data = []
     dosya_adi = "depremzede.txt"
     
@@ -72,26 +87,50 @@ def load_depremzede():
                 if not line:
                     continue
                 
-                # Virgül ile ayır
+                # Virgül ile ayır (CSV)
                 parts = line.split(",")
-                if len(parts) < 5:
-                    continue
+                if len(parts) >= 5:
+                    # Tırnakları temizle
+                    ad_soyad = parts[1].strip().strip('"') if len(parts) > 1 else ""
+                    poliklinik = parts[2].strip().strip('"') if len(parts) > 2 else ""
+                    hastane = parts[3].strip().strip('"') if len(parts) > 3 else ""
+                    gelis_sekli = parts[4].strip().strip('"') if len(parts) > 4 else ""
+                    il = parts[5].strip().strip('"') if len(parts) > 5 else ""
+                    
+                    data.append({
+                        "ad_soyad": ad_soyad,
+                        "poliklinik": poliklinik,
+                        "hastane": hastane,
+                        "gelis_sekli": gelis_sekli,
+                        "il": il
+                    })
+                    satir_sayisi += 1
                 
-                # Tırnakları temizle ve boşlukları düzelt
-                ad_soyad = parts[1].strip().strip('"')
-                poliklinik = parts[2].strip().strip('"') if len(parts) > 2 else ""
-                hastane = parts[3].strip().strip('"') if len(parts) > 3 else ""
-                gelis_sekli = parts[4].strip().strip('"') if len(parts) > 4 else ""
-                il = parts[5].strip().strip('"') if len(parts) > 5 else ""
+                # Pipe ile ayır (alternatif format)
+                elif "|" in line:
+                    parts = line.split("|")
+                    if len(parts) >= 5:
+                        data.append({
+                            "ad_soyad": parts[0].strip(),
+                            "poliklinik": parts[1].strip() if len(parts) > 1 else "",
+                            "hastane": parts[2].strip() if len(parts) > 2 else "",
+                            "gelis_sekli": parts[3].strip() if len(parts) > 3 else "",
+                            "il": parts[4].strip() if len(parts) > 4 else ""
+                        })
+                        satir_sayisi += 1
                 
-                data.append({
-                    "ad_soyad": ad_soyad,
-                    "poliklinik": poliklinik,
-                    "hastane": hastane,
-                    "gelis_sekli": gelis_sekli,
-                    "il": il
-                })
-                satir_sayisi += 1
+                # Boşluk ile ayır (alternatif format)
+                elif " " in line:
+                    parts = line.split(maxsplit=4)
+                    if len(parts) >= 5:
+                        data.append({
+                            "ad_soyad": parts[0].strip(),
+                            "poliklinik": parts[1].strip() if len(parts) > 1 else "",
+                            "hastane": parts[2].strip() if len(parts) > 2 else "",
+                            "gelis_sekli": parts[3].strip() if len(parts) > 3 else "",
+                            "il": parts[4].strip() if len(parts) > 4 else ""
+                        })
+                        satir_sayisi += 1
             
             print(f"✅ Depremzede: {satir_sayisi} satır okundu, {len(data)} kayıt yüklendi")
             
@@ -142,14 +181,7 @@ def mernis_sorgula(
     ad_soyad: Optional[str] = None,
     il: Optional[str] = None
 ):
-    """
-    Mernis sorgula
-    - tc: TC Kimlik Numarası
-    - ad: Ad
-    - soyad: Soyad
-    - ad_soyad: Tam Ad Soyad
-    - il: İl
-    """
+    """Mernis sorgula"""
     sonuclar = []
     
     for tc_kayit, bilgi in mernis_data.items():
@@ -159,14 +191,21 @@ def mernis_sorgula(
             if tc != tc_kayit:
                 eslesme = False
         if ad and eslesme:
-            if ad.upper() not in bilgi["ad"].upper():
+            # Ad alanı var mı kontrol et
+            if "ad" in bilgi:
+                if ad.upper() not in bilgi["ad"].upper():
+                    eslesme = False
+            else:
                 eslesme = False
         if soyad and eslesme:
             if soyad.upper() not in bilgi["soyad"].upper():
                 eslesme = False
         if ad_soyad and eslesme:
-            tam_ad = f"{bilgi['ad']} {bilgi['soyad']}"
-            if ad_soyad.upper() not in tam_ad.upper():
+            if "ad" in bilgi:
+                tam_ad = f"{bilgi['ad']} {bilgi['soyad']}"
+                if ad_soyad.upper() not in tam_ad.upper():
+                    eslesme = False
+            else:
                 eslesme = False
         if il and eslesme:
             if il.upper() not in bilgi["il"].upper():
@@ -175,9 +214,7 @@ def mernis_sorgula(
         if eslesme:
             sonuclar.append({
                 "tc": tc_kayit,
-                "ad": bilgi["ad"],
-                "soyad": bilgi["soyad"],
-                "il": bilgi["il"]
+                **bilgi
             })
     
     if not sonuclar:
